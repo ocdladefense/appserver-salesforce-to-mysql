@@ -41,47 +41,31 @@ class SalesforceModule extends Module {
     }
 
 
-    /**
-     * basic - Id, FirstName, LastName
-     * donor_info - New donation fields.
-     * contact_general - A lot of fields that are transferred to FileMaker.
-     */
-	public function transfer($sobject = "Contact", $list = "basic") {
-
-		$date = new DateTime();
-		$date->modify('-120 day');
-		$date = $date->format('Y-m-d');
 
 
-		$api = loadApi();
 
-        $key = strtolower($sobject);
+	public function transfer($sobject, $soql, $fields) {
 
-		$affectedRows = 0;
-
-		$fields = array(
-			"IsDeleted",
-			"OcdlaIsPaperless__c",
-			"Ocdla_Home_Address_Publish__c",
-			"Ocdla_Publish_Work_Phone__c",
-			"Ocdla_Noflag__c",
-			"Ocdla_Is_Board_Member__c",
-			"Ocdla_Is_Board_Member_Past__c",
-			"Ocdla_Is_Board_Past_President__c",
-			"Ocdla_Current_Member_Flag__c"
-		);
-
-
-		$fields = config($list);
-		$fields []= "CreatedDate";
-		$fields []= "LastModifiedDate";
-		$fieldListq = implode(", ", $fields);
-
-		// Format of Select query to Salesforce.
-		$select = "SELECT %s FROM Contact WHERE LastModifiedDate >= %sT00:00:00Z";
 
 		// Format of Insert query to MySQL.
-		$insert = "INSERT INTO force_contact (%s) VALUES %s AS new(%s) ON DUPLICATE KEY UPDATE %s";
+		$insert = "INSERT INTO force_%s (%s) VALUES %s AS new(%s) ON DUPLICATE KEY UPDATE %s";
+
+		// Connect to Salesforce.
+		$api = loadApi();
+
+		// Store how many updates take place after the transfer to MySQL.
+		$affectedRows = 0;
+
+		// MySQL schema needed to properly formate the MySQL query.
+		$schema = [];
+
+		// Set to non-false value when paging through Salesforce records.
+		$next = false;
+
+		// Output to display.
+		$out = [];
+
+
 
 		// Prepare the MySQL insert query.
 		$updates = array_filter($fields, function($f) { return $f != "Id"; });
@@ -89,14 +73,10 @@ class SalesforceModule extends Module {
 		$fieldList = implode(", ", $fields);
 		$updateList = implode(", ", $updates);
 
-		
-		// Get records from Salesforce.
-		$query = sprintf($select, $fieldListq, $date);
-
 
 		$result = $this->mysqli->query("DESCRIBE force_contact");
 
-		$schema = [];
+		
 
 		while($info = $result->fetch_assoc()) {
 			$field = $info["Field"];
@@ -117,18 +97,15 @@ class SalesforceModule extends Module {
 		$this->mysqli->query("LOCK TABLES force_contact WRITE");
 
 
-		// Set to non-false value when paging.
-		$next = false;
 
-		$out = [];
 
         do {
 
 			// We will insert/update rows into the appropriate table.
 			$rows = array();
 
-			$out []= $next ? "Starting batch {$next}." : "Performing query $query.";
-			$resp = $next ? $api->queryUrl($next) : $api->queryIncludeDeleted($query, true);
+			$out []= $next ? "Starting batch {$next}." : "Performing query $soql.";
+			$resp = $next ? $api->queryUrl($next) : $api->queryIncludeDeleted($soql, true);
 
 			if(!$resp->isSuccess()) throw new Exception($resp->getErrorMessage());
 
@@ -181,7 +158,7 @@ class SalesforceModule extends Module {
 			
 			$rows = array_map(function($row) { return "(" . implode(", ",$row) . ")";}, $rows);
 			$rowList = implode(", ", $rows);
-			$query = sprintf($insert, $fieldList, $rowList, $fieldList, $updateList);
+			$query = sprintf($insert, strtolower($sobject), $fieldList, $rowList, $fieldList, $updateList);
 			$out []= $query;
 			// print $query;
 			// exit;
@@ -200,6 +177,37 @@ class SalesforceModule extends Module {
 		$out []= ("<br />" . $affectedRows ." rows were updated.");
 
 		return implode("<br />", $out);
+	}
+
+
+
+    /**
+     * basic - Id, FirstName, LastName
+     * donor_info - New donation fields.
+     * contact_general - A lot of fields that are transferred to FileMaker.
+     */
+	public function transferRecentSObjectRecords($sobject = "contact", $list = "basic") {
+
+		$date = new DateTime();
+		$date->modify('-120 day');
+		$date = $date->format('Y-m-d');
+
+        $key = strtolower($sobject);
+
+		$fields = config($list);
+		$fields []= "CreatedDate";
+		$fields []= "LastModifiedDate";
+		$fieldListq = implode(", ", $fields);
+
+		// Format of Select query to Salesforce.
+		$select = "SELECT %s FROM %s WHERE LastModifiedDate >= %sT00:00:00Z";
+
+
+		// Get records from Salesforce.
+		$soql = sprintf($select, $fieldListq, ucwords($sobject), $date);
+
+
+		return $this->transfer($sobject, $soql, $fields);
 	}	
 
 

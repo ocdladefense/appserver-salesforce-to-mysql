@@ -5,7 +5,7 @@
 	"files": [],
 	"routes": {
         "transfer/%sobject/%list/recent": {
-            "callback": "transfer",
+            "callback": "transferRecentSObjectRecords",
             "content-type": "text/html"
         }
     }
