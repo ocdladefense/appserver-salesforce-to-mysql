@@ -1,5 +1,5 @@
 {
-    "name": "ocdladefense/salesforce",
+    "name": "ocdladefense/appserver-salesforce",
     "description": "Module to migrate data from Salesforce.",
     "type": "wordpress-theme",
     "license": "MIT",
