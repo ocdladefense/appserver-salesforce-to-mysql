@@ -1,0 +1,14 @@
+{
+	"comment": "This is a module template",
+	"name": "module-template", 
+	"description": "A module for building other modules.",
+    "connectedApp":"default",
+	"files": [],
+	"routes": {
+        "example/route":{
+            "callback":"callbackName",
+            "content-type":"text/html"
+        }
+    }
+}
+
