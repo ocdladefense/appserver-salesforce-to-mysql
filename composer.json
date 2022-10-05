@@ -1,8 +1,10 @@
 {
-    "name": "ocdladefense/project",
-    "description": "",
+    "name": "ocdladefense/salesforce",
+    "description": "Module to migrate data from Salesforce.",
     "type": "wordpress-theme",
     "license": "MIT",
     "authors": [],
-    "require": {}
+    "require": {
+        "ocdladefense/lib-salesforce-rest-api": "~3.10"
+    }
 }

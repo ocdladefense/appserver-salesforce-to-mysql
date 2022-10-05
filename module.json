@@ -1,13 +1,12 @@
 {
-	"comment": "This is a module template",
-	"name": "module-template", 
-	"description": "A module for building other modules.",
+	"name": "salesforce", 
+	"description": "Module for connecting to Salesforce and transferring data.",
     "connectedApp":"default",
 	"files": [],
 	"routes": {
-        "example/route":{
-            "callback":"callbackName",
-            "content-type":"text/html"
+        "transfer/%sobject/%list/recent": {
+            "callback": "transfer",
+            "content-type": "text/html"
         }
     }
 }
