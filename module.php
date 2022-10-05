@@ -13,7 +13,29 @@ use Mysql\Database;
 
 class SalesforceModule extends Module {
 
+    private $mysqli;
+
+
+
     public function __construct() {
+
+
+		$params = array(
+			"host" => config("salesforce.transfer.host"),
+			"user" => config("salesforce.transfer.user"),
+			"password" => config("salesforce.transfer.password"),
+			"name" => config("salesforce.transfer.database")
+		);
+
+
+		Database::setDefault($params);
+		$db = new Database();
+		$mysqli = $db->getConnection();
+
+		$mysqli->set_charset("utf8mb4");
+		$mysqli->query("SET NAMES utf8mb4 COLLATE utf8mb4_0900_as_cs");
+        $this->mysqli = $mysqli;
+
 
         parent::__construct();
     }
@@ -24,7 +46,12 @@ class SalesforceModule extends Module {
      * donor_info - New donation fields.
      * contact_general - A lot of fields that are transferred to FileMaker.
      */
-	public function transfer($sobject = "Contact", $list = "basic", $date = "2020-01-01") {
+	public function transfer($sobject = "Contact", $list = "basic") {
+
+		$date = new DateTime();
+		$date->modify('-120 day');
+		$date = $date->format('Y-m-d');
+
 
 		$api = loadApi();
 
@@ -50,10 +77,10 @@ class SalesforceModule extends Module {
 		$fields []= "LastModifiedDate";
 		$fieldListq = implode(", ", $fields);
 
-		// Select query to Salesforce.
+		// Format of Select query to Salesforce.
 		$select = "SELECT %s FROM Contact WHERE LastModifiedDate >= %sT00:00:00Z";
 
-		// Insert query to MySQL.
+		// Format of Insert query to MySQL.
 		$insert = "INSERT INTO force_contact (%s) VALUES %s AS new(%s) ON DUPLICATE KEY UPDATE %s";
 
 		// Prepare the MySQL insert query.
@@ -67,24 +94,27 @@ class SalesforceModule extends Module {
 		$query = sprintf($select, $fieldListq, $date);
 
 
-		$params = array(
-			"host" => config("salesforce.transfer.host"),
-			"user" => config("salesforce.transfer.user"),
-			"password" => config("salesforce.transfer.password"),
-			"name" => config("salesforce.transfer.database")
-		);
+		$result = $this->mysqli->query("DESCRIBE force_contact");
+
+		$schema = [];
+
+		while($info = $result->fetch_assoc()) {
+			$field = $info["Field"];
+			$type = $info["Type"];
 
 
+			$schema[$field] = array(
+				"type" => $info["Type"],
+				"is_int" => (strpos($type,"int") !== false),
+				"is_date" => (strpos($type,"date") !== false)
+			);
+		}
 
+		// var_dump($schema);
+		// exit;
+		
 
-
-		Database::setDefault($params);
-		$db = new Database();
-		$conn = $db->getConnection();
-
-		$conn->set_charset("utf8mb4");
-		$conn->query("SET NAMES utf8mb4 COLLATE utf8mb4_0900_as_cs");
-		$conn->query("LOCK TABLES force_contact WRITE");
+		$this->mysqli->query("LOCK TABLES force_contact WRITE");
 
 
 		// Set to non-false value when paging.
@@ -94,11 +124,10 @@ class SalesforceModule extends Module {
 
         do {
 
-			$out []= "Starting batch {$next}.";
-
 			// We will insert/update rows into the appropriate table.
 			$rows = array();
 
+			$out []= $next ? "Starting batch {$next}." : "Performing query $query.";
 			$resp = $next ? $api->queryUrl($next) : $api->queryIncludeDeleted($query, true);
 
 			if(!$resp->isSuccess()) throw new Exception($resp->getErrorMessage());
@@ -122,15 +151,30 @@ class SalesforceModule extends Module {
 
 				foreach($fields as $field) {
 					$value = $record[$field];
-					if(in_array($field, array("CreatedDate","LastModifiedDate"))) {
-						$value = explode("+",$value)[0];
+
+					// Convert boolean values to either 0 or 1.
+					if($schema[$field]["is_int"] && is_bool($value)) {
+						$value = $value ? 1 : 0;
 					}
-					$row []= $conn->real_escape_string($value);
+					if($schema[$field]["is_date"]) {
+						$value = explode("+",$value)[0];
+						$value = empty($value) ? null : $value;
+					}
+					$row[$field] = $schema[$field]["is_int"] ? $value : $this->mysqli->real_escape_string($value);
 				}
 				
-				
-				$row = array_map(function($v) { return "'{$v}'"; }, $row);
+				// Format string and date/time values with single quotes. Numbers shouldn't get quotes.
+				$row = array_map(function($v,$k) use($schema) { 
+
+						if(null == $v) {
+							return "NULL";
+						}
+						else return $schema[$k]["is_int"] ? $v : "'{$v}'";
+					}, $row, array_keys($row));
+
 				$rows []= $row;
+
+				// var_dump($row);exit;
 			}
 
 			// var_dump($rows);exit;
@@ -138,21 +182,21 @@ class SalesforceModule extends Module {
 			$rows = array_map(function($row) { return "(" . implode(", ",$row) . ")";}, $rows);
 			$rowList = implode(", ", $rows);
 			$query = sprintf($insert, $fieldList, $rowList, $fieldList, $updateList);
-
+			$out []= $query;
 			// print $query;
 			// exit;
 
-			$result = $conn->query($query);
+			$result = $this->mysqli->query($query);
 			// var_dump($conn->affected_rows);
 			// var_dump($result);
 
-			$affectedRows += $conn->affected_rows;
+			$affectedRows += $this->mysqli->affected_rows;
 		
         
         } while($next);
 		
 
-		$conn->query("UNLOCK TABLES");
+		$this->mysqli->query("UNLOCK TABLES");
 		$out []= ("<br />" . $affectedRows ." rows were updated.");
 
 		return implode("<br />", $out);
