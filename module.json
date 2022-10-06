@@ -7,6 +7,10 @@
         "transfer/%sobject/%list/recent": {
             "callback": "transferRecentSObjectRecords",
             "content-type": "text/html"
+        },
+        "transfer/%sobject/%list/all": {
+            "callback": "transferAll",
+            "content-type": "text/html"
         }
     }
 }

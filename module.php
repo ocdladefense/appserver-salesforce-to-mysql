@@ -189,6 +189,31 @@ class SalesforceModule extends Module {
 	public function transferRecentSObjectRecords($sobject = "contact", $list = "basic") {
 
 		$date = new DateTime();
+		$date->modify('-7 day');
+		$date = $date->format('Y-m-d');
+
+        $key = strtolower($sobject);
+
+		$fields = config($list);
+		$fields []= "CreatedDate";
+		$fields []= "LastModifiedDate";
+		$fieldListq = implode(", ", $fields);
+
+		// Format of Select query to Salesforce.
+		$select = "SELECT %s FROM %s WHERE (NOT Email LIKE '%%qq.com%%') AND LastModifiedDate >= %sT00:00:00Z";
+
+
+		// Get records from Salesforce.
+		$soql = sprintf($select, $fieldListq, ucwords($sobject), $date);
+
+
+		return $this->transfer($sobject, $soql, $fields);
+	}	
+
+
+	public function transferAll($sobject = "contact", $list = "basic") {
+
+		$date = new DateTime();
 		$date->modify('-120 day');
 		$date = $date->format('Y-m-d');
 
@@ -200,7 +225,7 @@ class SalesforceModule extends Module {
 		$fieldListq = implode(", ", $fields);
 
 		// Format of Select query to Salesforce.
-		$select = "SELECT %s FROM %s WHERE LastModifiedDate >= %sT00:00:00Z";
+		$select = "SELECT %s FROM %s WHERE (NOT Email LIKE '%%qq.com%%')";
 
 
 		// Get records from Salesforce.
