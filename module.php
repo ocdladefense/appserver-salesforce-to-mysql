@@ -1,8 +1,6 @@
 <?php
 
 
-
-
 use Http\HttpResponse;
 use Http\HttpHeader;
 use Http\Http;
@@ -47,8 +45,8 @@ class SalesforceModule extends Module {
 	public function transfer($sobject, $soql, $fields) {
 
 
-		// Format of Insert query to MySQL.
-		$insert = "INSERT INTO force_%s (%s) VALUES %s AS new(%s) ON DUPLICATE KEY UPDATE %s";
+		// asdfjkl
+		$lock = "LOCK TABLES force_%s WRITE";
 
 		// Connect to Salesforce.
 		$api = loadApi();
@@ -57,7 +55,7 @@ class SalesforceModule extends Module {
 		$affectedRows = 0;
 
 		// MySQL schema needed to properly formate the MySQL query.
-		$schema = [];
+		$schema = null;
 
 		// Set to non-false value when paging through Salesforce records.
 		$next = false;
@@ -67,42 +65,16 @@ class SalesforceModule extends Module {
 
 
 
-		// Prepare the MySQL insert query.
-		$updates = array_filter($fields, function($f) { return $f != "Id"; });
-		$updates = array_map(function($f) { return "{$f} = new.{$f}";}, $updates);
-		$fieldList = implode(", ", $fields);
-		$updateList = implode(", ", $updates);
-
-
-		$result = $this->mysqli->query("DESCRIBE force_contact");
-
+		$lockQuery = sprintf($lock, $sobject);
 		
-
-		while($info = $result->fetch_assoc()) {
-			$field = $info["Field"];
-			$type = $info["Type"];
+		$schema = $this->getSchema($sobject);
 
 
-			$schema[$field] = array(
-				"type" => $info["Type"],
-				"is_int" => (strpos($type,"int") !== false),
-				"is_date" => (strpos($type,"date") !== false)
-			);
-		}
 
-		// var_dump($schema);
-		// exit;
-		
-
-		$this->mysqli->query("LOCK TABLES force_contact WRITE");
-
-
+		$this->mysqli->query($lockQuery);
 
 
         do {
-
-			// We will insert/update rows into the appropriate table.
-			$rows = array();
 
 			$out []= $next ? "Starting batch {$next}." : "Performing query $soql.";
 			$resp = $next ? $api->queryUrl($next) : $api->queryIncludeDeleted($soql, true);
@@ -120,45 +92,13 @@ class SalesforceModule extends Module {
 				return "No records founds for importing...";
 			}
 			
-			// Assign values to the MySQL insert query.
-			for($count = 0; $count < count($records); $count++) {
-
-				$record = $records[$count];
-				$row = array();
-
-				foreach($fields as $field) {
-					$value = $record[$field];
-
-					// Convert boolean values to either 0 or 1.
-					if($schema[$field]["is_int"] && is_bool($value)) {
-						$value = $value ? 1 : 0;
-					}
-					if($schema[$field]["is_date"]) {
-						$value = explode("+",$value)[0];
-						$value = empty($value) ? null : $value;
-					}
-					$row[$field] = $schema[$field]["is_int"] ? $value : $this->mysqli->real_escape_string($value);
-				}
-				
-				// Format string and date/time values with single quotes. Numbers shouldn't get quotes.
-				$row = array_map(function($v,$k) use($schema) { 
-
-						if(null == $v) {
-							return "NULL";
-						}
-						else return $schema[$k]["is_int"] ? $v : "'{$v}'";
-					}, $row, array_keys($row));
-
-				$rows []= $row;
-
-				// var_dump($row);exit;
-			}
-
-			// var_dump($rows);exit;
 			
-			$rows = array_map(function($row) { return "(" . implode(", ",$row) . ")";}, $rows);
-			$rowList = implode(", ", $rows);
-			$query = sprintf($insert, strtolower($sobject), $fieldList, $rowList, $fieldList, $updateList);
+			// Convert objects returned from REST API to rows 
+			// that can be inserted into MySQL database.
+			$rows = $this->getRows($records, $fields, $schema);
+
+			$query = $this->getInsertQuery($sobject, $rows, $fields);
+			
 			$out []= $query;
 			// print $query;
 			// exit;
@@ -181,6 +121,118 @@ class SalesforceModule extends Module {
 
 
 
+
+
+	public function getInsertQuery($table, $rows, $fields) {
+
+		// Format of Insert query to MySQL.
+		$insert = "INSERT INTO force_%s (%s) VALUES %s AS new(%s) ON DUPLICATE KEY UPDATE %s";
+
+		// Prepare the MySQL insert query.
+		$updates = array_filter($fields, function($f) { return $f != "Id"; });
+		$updates = array_map(function($f) { return "{$f} = new.{$f}";}, $updates);
+		$fieldList = implode(", ", $fields);
+		$updateList = implode(", ", $updates);
+
+
+		$rows = array_map(function($row) { return "(" . implode(", ",$row) . ")";}, $rows);
+		$rowList = implode(", ", $rows);
+			
+		return sprintf($insert, strtolower($table), $fieldList, $rowList, $fieldList, $updateList);
+	}
+
+
+
+
+	public function getRows($records, $fields, $schema) {
+
+		// We will insert/update rows into the appropriate table.
+		$rows = array();
+
+		
+		// Assign values to the MySQL insert query.
+		for($count = 0; $count < count($records); $count++) {
+
+			$record = $records[$count];
+			$row = array();
+
+			foreach($fields as $field) {
+				$value = $record[$field];
+
+				// Convert boolean values to either 0 or 1.
+				if($schema[$field]["is_int"] && is_bool($value)) {
+					$value = $value ? 1 : 0;
+				}
+				if($schema[$field]["is_date"]) {
+					$value = explode("+",$value)[0];
+					$value = empty($value) ? null : $value;
+				}
+				$row[$field] = $schema[$field]["is_int"] ? $value : $this->mysqli->real_escape_string($value);
+			}
+			
+			// Format string and date/time values with single quotes. Numbers shouldn't get quotes.
+			$row = array_map(function($v,$k) use($schema) { 
+
+				if(null == $v) {
+					return "NULL";
+				}
+				else return $schema[$k]["is_int"] ? $v : "'{$v}'";
+			}, $row, array_keys($row));
+
+			$rows []= $row;
+		}
+
+		// var_dump($rows);exit;
+		
+		return $rows;
+	}
+
+
+
+
+
+
+
+	/**
+	 * Return an array of schema statements for a given table.
+	 * Schema statements can let us format the query,
+	 * for example by identifying string columns that should be wrapped
+	 * in quotes.
+	 */
+	public function getSchema($table) {
+
+		// Get field metadata.
+		$describe = "DESCRIBE force_%s";
+
+
+		$query = sprintf($describe, $table);
+	
+
+		$schema = [];
+
+
+		$result = $this->mysqli->query($query);
+
+		while($info = $result->fetch_assoc()) {
+			$field = $info["Field"];
+			$type = $info["Type"];
+
+
+			$schema[$field] = array(
+				"type" => $info["Type"],
+				"is_int" => (strpos($type,"int") !== false),
+				"is_date" => (strpos($type,"date") !== false)
+			);
+		}
+
+
+		return $schema;
+	}
+
+
+
+
+
     /**
      * basic - Id, FirstName, LastName
      * donor_info - New donation fields.
@@ -194,14 +246,14 @@ class SalesforceModule extends Module {
 
         $key = strtolower($sobject);
 
-		$fields = config($list);
+		$config = config($list);
+		$fields = $config["fields"];
 		$fields []= "CreatedDate";
 		$fields []= "LastModifiedDate";
 		$fieldListq = implode(", ", $fields);
 
 		// Format of Select query to Salesforce.
-		$select = "SELECT %s FROM %s WHERE (NOT Email LIKE '%%qq.com%%') AND LastModifiedDate >= %sT00:00:00Z";
-
+		$select = $config["select"] ." AND LastModifiedDate >= %sT00:00:00Z";
 
 		// Get records from Salesforce.
 		$soql = sprintf($select, $fieldListq, ucwords($sobject), $date);
@@ -211,6 +263,11 @@ class SalesforceModule extends Module {
 	}	
 
 
+
+
+	/**
+	 * Transfer 
+	 */
 	public function transferAll($sobject = "contact", $list = "basic") {
 
 		$date = new DateTime();
@@ -219,13 +276,14 @@ class SalesforceModule extends Module {
 
         $key = strtolower($sobject);
 
-		$fields = config($list);
+		$config = config($list);
+		$fields = $config["fields"];
 		$fields []= "CreatedDate";
 		$fields []= "LastModifiedDate";
 		$fieldListq = implode(", ", $fields);
 
 		// Format of Select query to Salesforce.
-		$select = "SELECT %s FROM %s WHERE (NOT Email LIKE '%%qq.com%%')";
+		$select = $config["select"];
 
 
 		// Get records from Salesforce.
