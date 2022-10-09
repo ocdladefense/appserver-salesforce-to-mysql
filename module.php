@@ -18,11 +18,12 @@ class SalesforceModule extends Module {
     public function __construct() {
 
 
+		$config = loadModuleConfig("salesforce");
 		$params = array(
-			"host" => config("salesforce.transfer.host"),
-			"user" => config("salesforce.transfer.user"),
-			"password" => config("salesforce.transfer.password"),
-			"name" => config("salesforce.transfer.database")
+			"host" => $config["salesforce.transfer.host"],
+			"user" => $config["salesforce.transfer.user"],
+			"password" => $config["salesforce.transfer.password"],
+			"name" => $config["salesforce.transfer.database"]
 		);
 
 
@@ -42,11 +43,11 @@ class SalesforceModule extends Module {
 
 
 
-	public function transfer($sobject, $soql, $fields) {
+	public function transfer($soql, $table, $fields) {
 
 
 		// asdfjkl
-		$lock = "LOCK TABLES force_%s WRITE";
+		$lock = "LOCK TABLES %s WRITE";
 
 		// Connect to Salesforce.
 		$api = loadApi();
@@ -65,9 +66,9 @@ class SalesforceModule extends Module {
 
 
 
-		$lockQuery = sprintf($lock, $sobject);
+		$lockQuery = sprintf($lock, $table);
 		
-		$schema = $this->getSchema($sobject);
+		$schema = $this->getSchema($table);
 
 
 
@@ -97,8 +98,11 @@ class SalesforceModule extends Module {
 			// that can be inserted into MySQL database.
 			$rows = $this->getRows($records, $fields, $schema);
 
-			$query = $this->getInsertQuery($sobject, $rows, $fields);
+			// Then use these rows to construct a properly-formatted INSERT query.
+			$query = $this->getInsertQuery($table, $rows, $fields);
 			
+	
+
 			$out []= $query;
 			// print $query;
 			// exit;
@@ -126,7 +130,7 @@ class SalesforceModule extends Module {
 	public function getInsertQuery($table, $rows, $fields) {
 
 		// Format of Insert query to MySQL.
-		$insert = "INSERT INTO force_%s (%s) VALUES %s AS new(%s) ON DUPLICATE KEY UPDATE %s";
+		$insert = "INSERT INTO %s (%s) VALUES %s AS new(%s) ON DUPLICATE KEY UPDATE %s";
 
 		// Prepare the MySQL insert query.
 		$updates = array_filter($fields, function($f) { return $f != "Id"; });
@@ -202,7 +206,7 @@ class SalesforceModule extends Module {
 	public function getSchema($table) {
 
 		// Get field metadata.
-		$describe = "DESCRIBE force_%s";
+		$describe = "DESCRIBE %s";
 
 
 		$query = sprintf($describe, $table);
@@ -240,13 +244,18 @@ class SalesforceModule extends Module {
      */
 	public function transferRecentSObjectRecords($sobject = "contact", $list = "basic") {
 
+		
+
 		$date = new DateTime();
 		$date->modify('-7 day');
 		$date = $date->format('Y-m-d');
 
-        $key = strtolower($sobject);
+        $key = strtolower(implode(".", [$sobject,$list]));
 
-		$config = config($list);
+		$config = loadModuleConfig("salesforce", $key);
+
+
+		
 		$fields = $config["fields"];
 		$fields []= "CreatedDate";
 		$fields []= "LastModifiedDate";
@@ -255,11 +264,13 @@ class SalesforceModule extends Module {
 		// Format of Select query to Salesforce.
 		$select = $config["select"] ." AND LastModifiedDate >= %sT00:00:00Z";
 
-		// Get records from Salesforce.
+		// Prepare Salesforce SOQL query.
 		$soql = sprintf($select, $fieldListq, ucwords($sobject), $date);
 
+		// Table that records should be transferred to.
+		$table = $config["table"];
 
-		return $this->transfer($sobject, $soql, $fields);
+		return $this->transfer($soql, $table, $fields);
 	}	
 
 
@@ -270,13 +281,12 @@ class SalesforceModule extends Module {
 	 */
 	public function transferAll($sobject = "contact", $list = "basic") {
 
-		$date = new DateTime();
-		$date->modify('-120 day');
-		$date = $date->format('Y-m-d');
 
-        $key = strtolower($sobject);
+        
+        $key = strtolower(implode(".", [$sobject,$list]));
 
-		$config = config($list);
+		$config = loadModuleConfig("salesforce", $key);
+
 		$fields = $config["fields"];
 		$fields []= "CreatedDate";
 		$fields []= "LastModifiedDate";
@@ -286,11 +296,13 @@ class SalesforceModule extends Module {
 		$select = $config["select"];
 
 
-		// Get records from Salesforce.
-		$soql = sprintf($select, $fieldListq, ucwords($sobject), $date);
+		// Prepare Salesforce SOQL query.
+		$soql = sprintf($select, $fieldListq, ucwords($sobject));
 
+		// Table that records should be transferred to.
+		$table = $config["table"];
 
-		return $this->transfer($sobject, $soql, $fields);
+		return $this->transfer($soql, $table, $fields);
 	}	
 
 
