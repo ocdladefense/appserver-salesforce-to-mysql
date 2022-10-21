@@ -262,7 +262,13 @@ class SalesforceModule extends Module {
 		$fieldListq = implode(", ", $fields);
 
 		// Format of Select query to Salesforce.
-		$select = $config["select"] ." AND LastModifiedDate >= %sT00:00:00Z";
+		$select = $config["select"];
+		
+		// Determine whether the query already has a WHERE
+		$hasWhere = count(explode("WHERE",$select)) > 1;
+		
+		$select .= ($hasWhere ? " AND " : " WHERE ");
+		$select .= " LastModifiedDate >= %sT00:00:00Z";
 
 		// Prepare Salesforce SOQL query.
 		$soql = sprintf($select, $fieldListq, ucwords($sobject), $date);
