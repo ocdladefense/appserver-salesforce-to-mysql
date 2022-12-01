@@ -2,7 +2,7 @@
 	"name": "salesforce", 
 	"description": "Module for connecting to Salesforce and transferring data.",
     "connectedApp":"default",
-	"files": [],
+	"files": ["Mysql.php"],
 	"routes": {
         "transfer/%sobject/%list/recent": {
             "callback": "transferRecentSObjectRecords",
@@ -11,6 +11,10 @@
         "transfer/%sobject/%list/all": {
             "callback": "transferAll",
             "content-type": "text/html"
+        },
+        "salesforce/query": {
+            "callback": "doQuery",
+            "content-type": "application/json"
         }
     }
 }
