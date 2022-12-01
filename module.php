@@ -9,6 +9,7 @@ use Mysql\Database;
 
 
 
+
 class SalesforceModule extends Module {
 
     private $mysqli;
@@ -17,34 +18,101 @@ class SalesforceModule extends Module {
 
     public function __construct() {
 
-
-		$config = loadModuleConfig("salesforce");
-		$params = array(
-			"host" => $config["salesforce.transfer.host"],
-			"user" => $config["salesforce.transfer.user"],
-			"password" => $config["salesforce.transfer.password"],
-			"name" => $config["salesforce.transfer.database"]
-		);
-
-
-		Database::setDefault($params);
-		$db = new Database();
-		$mysqli = $db->getConnection();
-
-		$mysqli->set_charset("utf8mb4");
-		$mysqli->query("SET NAMES utf8mb4 COLLATE utf8mb4_0900_as_cs");
-        $this->mysqli = $mysqli;
-
-
         parent::__construct();
     }
 
 
 
+	function doQuery() {
+
+		$request = $this->getRequest();
+		$body = $request->getBody();
+
+		
+		$where = $body->where;
+		$limit = $body->limit;
+		$orderBy = $body->orderBy;
+		$offset = $body->offset;
+		$subquery = "";
+
+		for($i = 0; $i < count($where); $i++) {
+			$sub = $where[$i];
+			if("areaOfInterest" == $sub->field) {
+				unset($where[$i]);
+				$format = " AND Id IN (SELECT Contact__c FROM AreaOfInterest__c WHERE Interest__c = '%s') ";
+				$subquery = sprintf($format,$sub->value);
+			}
+		}
+
+		$query = "SELECT Id, Name, FirstName, LastName, Ocdla_Member_Status__c, Ocdla_Occupation_Field_Type__c, Ocdla_Organization__c, Phone, Email, MailingAddress, Ocdla_Current_Member_Flag__c, Ocdla_Is_Expert_Witness__c FROM Contact ";
+
+
+		$countq = "SELECT COUNT(Id) FROM Contact ";
+
+		if($where != null)
+		{
+            //null position and limit bug fixed
+            //unsure if we can persist feature on map and change its datasource
+            //may need to update library, mapfeature class
+			$query .= "WHERE MailingLatitude != null AND ";
+			$countq .= "WHERE MailingLatitude != null AND ";
+
+			$struct = [];
+			foreach($where as $obj)
+			{
+                if (is_bool($obj->value))
+                {
+                    $struct[]= $obj->field." ".$obj->op." ".($obj->value ? "True" : "False");
+                }
+                else 
+                {
+				    $struct[]= $obj->field." ".$obj->op." '".$obj->value."'";
+                }
+			}
+			$query .= implode(" AND ",$struct);
+			$countq .= implode(" AND ",$struct);
+		}
+
+        $query .= $subquery;
+		$countq .= $subquery;
+
+
+		if($orderBy != null) {
+			$query .= " ORDER BY ".$orderBy;
+		}
+
+        if($limit != null)
+		{
+			$query .= " LIMIT ".$limit;
+		}
+
+		if($offset != null)
+		{
+			$query .= " OFFSET ".$offset;
+		}
+        //var_dump($query);
+
+		$api = loadApi();
+
+		$result = $api->query($query);
+		$count = $api->query($countq);
+		
+        $myResult = array();
+        $myResult["query"] = $query;
+        $myResult["records"] = $result->getRecords();	
+		$myResult["count"] = $count->getRecords()[0]["expr0"];
+
+
+		return $myResult;		
+	}
+
 
 
 	public function transfer($soql, $table, $fields) {
 
+
+		$mysql = new Mysql();
+		$this->mysqli = $mysql->getConnection();
 
 		// asdfjkl
 		$lock = "LOCK TABLES %s WRITE";
